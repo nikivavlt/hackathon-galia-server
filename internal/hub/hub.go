@@ -20,16 +20,17 @@ var upgrader = websocket.Upgrader{
 }
 
 type Hub struct {
-	mu    sync.Mutex
+	mu      sync.Mutex
 	clients map[int]*client.Client
-	game  *game.Game
-	reg   chan *client.Client
-	unreg chan *client.Client
+	game    *game.Game
+	reg     chan *client.Client
+	unreg   chan *client.Client
+	nextID  int
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[int]*client.Client, config.MaxPlayers),
+		clients: make(map[int]*client.Client),
 		game:    game.NewGame(),
 		reg:     make(chan *client.Client),
 		unreg:   make(chan *client.Client),
@@ -51,12 +52,13 @@ func (h *Hub) Run() {
 			h.clients[c.PlayerID] = c
 			h.mu.Unlock()
 
-			h.game.ConnectPlayer(c.PlayerID)
-			log.Printf("[hub] player %d connected (%d/%d)", c.PlayerID, len(h.clients), config.MaxPlayers)
+			h.game.ConnectPlayer(c.PlayerID, c.Name)
+			log.Printf("[hub] player %d connected (%d total)", c.PlayerID, len(h.clients))
 
 			c.SendJSON(models.ServerMsg{Type: "joined", Payload: models.JoinedPayload{
 				PlayerID: c.PlayerID,
 			}})
+			c.SendJSON(models.ServerMsg{Type: "map", Payload: h.game.GetMap()})
 			c.SendJSON(models.ServerMsg{Type: "state", Payload: h.game.Snapshot()})
 
 		case c := <-h.unreg:
@@ -65,7 +67,7 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 			h.game.DisconnectPlayer(c.PlayerID)
-			log.Printf("[hub] player %d disconnected (%d/%d)", c.PlayerID, len(h.clients), config.MaxPlayers)
+			log.Printf("[hub] player %d disconnected (%d total)", c.PlayerID, len(h.clients))
 
 		case <-ticker.C:
 			state := h.game.Tick()
@@ -92,35 +94,34 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	slot, ok := h.nextSlot()
-	if !ok {
-		http.Error(w, "game full (max 4 players)", http.StatusServiceUnavailable)
-		return
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = "Player"
 	}
+	if len(name) > 20 {
+		name = name[:20]
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("[ws] upgrade error:", err)
 		return
 	}
+
+	h.mu.Lock()
+	id := h.nextID
+	h.nextID++
+	h.mu.Unlock()
+
 	c := &client.Client{
 		Hub:      h,
 		Game:     h.game,
 		Conn:     conn,
 		Send:     make(chan []byte, 64),
-		PlayerID: slot,
+		PlayerID: id,
+		Name:     name,
 	}
 	h.reg <- c
 	go c.WritePump()
 	go c.ReadPump()
-}
-
-func (h *Hub) nextSlot() (int, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for i := 0; i < config.MaxPlayers; i++ {
-		if _, used := h.clients[i]; !used {
-			return i, true
-		}
-	}
-	return -1, false
 }

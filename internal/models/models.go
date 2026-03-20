@@ -1,16 +1,5 @@
 package models
 
-import "game-server/internal/config"
-
-var StartPositions = [config.MaxPlayers]Pos{
-	{0, 0},
-	{config.GridSize - config.PlayerSize, 0},
-	{0, config.GridSize - config.PlayerSize},
-	{config.GridSize - config.PlayerSize, config.GridSize - config.PlayerSize},
-}
-
-var PlayerColors = [config.MaxPlayers]string{"blue", "green", "orange", "purple"}
-
 type Pos struct {
 	X int `json:"x"`
 	Y int `json:"y"`
@@ -18,9 +7,9 @@ type Pos struct {
 
 type Player struct {
 	ID        int    `json:"id"`
+	Name      string `json:"name"`
 	Pos       Pos    `json:"pos"`
 	Connected bool   `json:"connected"`
-	Color     string `json:"color"`
 	Direction string `json:"direction"`
 }
 
@@ -50,8 +39,12 @@ type KillEvent struct {
 	KillerID int `json:"killerId"`
 }
 
+type MapPayload struct {
+	Grid [][]int `json:"grid"`
+}
+
 type StatePayload struct {
-	Players    [config.MaxPlayers]Player `json:"players"`
-	Bullets    []Bullet                  `json:"bullets"`
-	KillEvents []KillEvent               `json:"-"`
+	Players    []Player    `json:"players"`
+	Bullets    []Bullet    `json:"bullets"`
+	KillEvents []KillEvent `json:"-"`
 }

@@ -1,11 +1,12 @@
 package config
 
 const (
-	GridSize        = 800
-	MaxPlayers      = 4
+	GridSize        = 1024
 	TickMs          = 17
 	Speed           = 2
 	PlayerSize      = 32
+	TileSize        = PlayerSize
+	TileCount       = GridSize / TileSize
 	BulletSpeed     = Speed * 3
 	BulletSize      = 8
 	ShootCooldownMs = 300

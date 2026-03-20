@@ -32,6 +32,7 @@ type Client struct {
 	Conn     *websocket.Conn
 	Send     chan []byte
 	PlayerID int
+	Name     string
 }
 
 func (c *Client) SendJSON(v interface{}) {

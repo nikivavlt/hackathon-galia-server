@@ -1,6 +1,7 @@
 package game
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
@@ -10,47 +11,136 @@ import (
 
 type Game struct {
 	mu               sync.RWMutex
-	players          [config.MaxPlayers]models.Player
-	grid             [config.GridSize][config.GridSize]int
-	activeDirections [config.MaxPlayers]string
-	lastDirections   [config.MaxPlayers]string
-	bullets          [config.MaxPlayers][]*models.Bullet
-	shootCooldown    [config.MaxPlayers]int64
+	players          map[int]models.Player
+	grid             [config.TileCount][config.TileCount]int
+	activeDirections map[int]string
+	lastDirections   map[int]string
+	bullets          map[int][]*models.Bullet
+	shootCooldown    map[int]int64
 	nextBulletID     int
 }
 
 func NewGame() *Game {
-	g := &Game{}
-	g.resetPlayers()
+	g := &Game{
+		players:          make(map[int]models.Player),
+		activeDirections: make(map[int]string),
+		lastDirections:   make(map[int]string),
+		bullets:          make(map[int][]*models.Bullet),
+		shootCooldown:    make(map[int]int64),
+	}
+	g.buildGrid()
 	return g
 }
 
-func (g *Game) resetPlayers() {
-	for i := 0; i < config.MaxPlayers; i++ {
-		g.players[i] = models.Player{
-			ID:    i,
-			Pos:   models.StartPositions[i],
-			Color: models.PlayerColors[i],
+func (g *Game) buildGrid() {
+	s := config.TileCount
+
+	for i := 0; i < s; i++ {
+		g.grid[0][i] = 1
+		g.grid[s-1][i] = 1
+		g.grid[i][0] = 1
+		g.grid[i][s-1] = 1
+	}
+
+	set := func(x, y, w, h int) {
+		for dy := 0; dy < h; dy++ {
+			for dx := 0; dx < w; dx++ {
+				if ty, tx := y+dy, x+dx; ty >= 0 && ty < s && tx >= 0 && tx < s {
+					g.grid[ty][tx] = 1
+				}
+			}
 		}
 	}
+
+	half := s / 2
+	q := s / 4
+
+	set(half-3, q-1, 6, 1)
+	set(half-3, half+q-1, 6, 1)
+	set(q-1, half-3, 1, 6)
+	set(half+q-1, half-3, 1, 6)
+	set(half-1, half-5, 1, 10)
+	set(half-5, half-1, 10, 1)
+	set(q-2, q-1, 4, 1)
+	set(q-1, q-2, 1, 4)
+	set(half+q-2, q-1, 4, 1)
+	set(half+q-1, q-2, 1, 4)
+	set(q-2, half+q-1, 4, 1)
+	set(q-1, half+q-2, 1, 4)
+	set(half+q-2, half+q-1, 4, 1)
+	set(half+q-1, half+q-2, 1, 4)
 }
 
-func (g *Game) ConnectPlayer(id int) {
+func (g *Game) GetMap() models.MapPayload {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	grid := make([][]int, config.TileCount)
+	for y := 0; y < config.TileCount; y++ {
+		row := make([]int, config.TileCount)
+		copy(row, g.grid[y][:])
+		grid[y] = row
+	}
+	return models.MapPayload{Grid: grid}
+}
+
+func (g *Game) ConnectPlayer(id int, name string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.players[id].Pos = models.StartPositions[id]
-	g.players[id].Connected = true
+	g.players[id] = models.Player{
+		ID:        id,
+		Name:      name,
+		Pos:       g.findSpawnPos(),
+		Connected: true,
+	}
 	g.activeDirections[id] = ""
 	g.bullets[id] = nil
 	g.shootCooldown[id] = 0
 }
 
+func (g *Game) findSpawnPos() models.Pos {
+	safeRadius := config.PlayerSize * 3
+	maxX := config.GridSize - config.PlayerSize
+	maxY := config.GridSize - config.PlayerSize
+
+	for attempt := 0; attempt < 100; attempt++ {
+		p := models.Pos{
+			X: rand.Intn(maxX),
+			Y: rand.Intn(maxY),
+		}
+		overlap := false
+		for _, pl := range g.players {
+			if !pl.Connected {
+				continue
+			}
+			dx := p.X - pl.Pos.X
+			dy := p.Y - pl.Pos.Y
+			if dx < 0 {
+				dx = -dx
+			}
+			if dy < 0 {
+				dy = -dy
+			}
+			if dx < safeRadius && dy < safeRadius {
+				overlap = true
+				break
+			}
+		}
+		if !overlap {
+			return p
+		}
+	}
+	return models.Pos{X: rand.Intn(maxX), Y: rand.Intn(maxY)}
+}
+
 func (g *Game) DisconnectPlayer(id int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.players[id].Connected = false
-	g.activeDirections[id] = ""
-	g.bullets[id] = nil
+	delete(g.players, id)
+	delete(g.activeDirections, id)
+	delete(g.lastDirections, id)
+	delete(g.bullets, id)
+	delete(g.shootCooldown, id)
 }
 
 func (g *Game) SetMove(playerID int, dir string) {
@@ -68,11 +158,14 @@ func (g *Game) Shoot(playerID int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	dir := g.lastDirections[playerID]
-	if dir == "" || !g.players[playerID].Connected {
+	pl, ok := g.players[playerID]
+	if !ok || !pl.Connected {
 		return
 	}
-
+	dir := g.lastDirections[playerID]
+	if dir == "" {
+		return
+	}
 	now := time.Now().UnixMilli()
 	if now-g.shootCooldown[playerID] < config.ShootCooldownMs {
 		return
@@ -80,9 +173,9 @@ func (g *Game) Shoot(playerID int) {
 	if len(g.bullets[playerID]) >= config.MaxBullets {
 		return
 	}
-	p := g.players[playerID].Pos
-	bx := p.X + config.PlayerSize/2 - config.BulletSize/2
-	by := p.Y + config.PlayerSize/2 - config.BulletSize/2
+
+	bx := pl.Pos.X + config.PlayerSize/2 - config.BulletSize/2
+	by := pl.Pos.Y + config.PlayerSize/2 - config.BulletSize/2
 
 	g.bullets[playerID] = append(g.bullets[playerID], &models.Bullet{
 		ID:       g.nextBulletID,
@@ -100,41 +193,44 @@ func (g *Game) Tick() models.StatePayload {
 
 	var kills []models.KillEvent
 
-	for i := 0; i < config.MaxPlayers; i++ {
-		if !g.players[i].Connected || g.activeDirections[i] == "" {
+	for id, pl := range g.players {
+		if !pl.Connected || g.activeDirections[id] == "" {
 			continue
 		}
 		for step := 0; step < config.Speed; step++ {
-			next := move(g.players[i].Pos, g.activeDirections[i])
-			if !g.walkable(next, i) {
-				g.activeDirections[i] = ""
+			next := move(pl.Pos, g.activeDirections[id])
+			if !g.walkable(next, id) {
+				g.activeDirections[id] = ""
 				break
 			}
-			g.players[i].Pos = next
+			pl.Pos = next
 		}
+		g.players[id] = pl
 	}
 
-	for i := 0; i < config.MaxPlayers; i++ {
-		active := g.bullets[i][:0]
-		for _, b := range g.bullets[i] {
+	for id, playerBullets := range g.bullets {
+		active := playerBullets[:0]
+		for _, b := range playerBullets {
 			keep := true
 			for step := 0; step < config.BulletSpeed; step++ {
 				b.Pos = move(b.Pos, b.Dir)
 
-				if b.Pos.X < 0 || b.Pos.Y < 0 || b.Pos.X+config.BulletSize > config.GridSize || b.Pos.Y+config.BulletSize > config.GridSize {
+				tx, ty := b.Pos.X/config.TileSize, b.Pos.Y/config.TileSize
+				if b.Pos.X < 0 || b.Pos.Y < 0 || b.Pos.X+config.BulletSize > config.GridSize || b.Pos.Y+config.BulletSize > config.GridSize || g.grid[ty][tx] == 1 {
 					keep = false
 					break
 				}
 
 				hit := false
-				for j := 0; j < config.MaxPlayers; j++ {
-					if j == b.PlayerID || !g.players[j].Connected {
+				for j, pl := range g.players {
+					if j == b.PlayerID || !pl.Connected {
 						continue
 					}
-					pl := g.players[j]
 					if b.Pos.X < pl.Pos.X+config.PlayerSize && b.Pos.X+config.BulletSize > pl.Pos.X &&
 						b.Pos.Y < pl.Pos.Y+config.PlayerSize && b.Pos.Y+config.BulletSize > pl.Pos.Y {
-						g.players[j].Pos = models.StartPositions[j]
+						respawned := pl
+						respawned.Pos = g.findSpawnPos()
+						g.players[j] = respawned
 						g.activeDirections[j] = ""
 						kills = append(kills, models.KillEvent{VictimID: j, KillerID: b.PlayerID})
 						keep = false
@@ -150,7 +246,7 @@ func (g *Game) Tick() models.StatePayload {
 				active = append(active, b)
 			}
 		}
-		g.bullets[i] = active
+		g.bullets[id] = active
 	}
 
 	payload := g.buildPayload()
@@ -165,9 +261,10 @@ func (g *Game) Snapshot() models.StatePayload {
 }
 
 func (g *Game) buildPayload() models.StatePayload {
-	players := g.players
-	for i := range players {
-		players[i].Direction = g.lastDirections[i]
+	players := make([]models.Player, 0, len(g.players))
+	for id, pl := range g.players {
+		pl.Direction = g.lastDirections[id]
+		players = append(players, pl)
 	}
 
 	bullets := []models.Bullet{}
@@ -184,7 +281,8 @@ func (g *Game) walkable(p models.Pos, forPlayer int) bool {
 	if p.X < 0 || p.Y < 0 || p.X+config.PlayerSize > config.GridSize || p.Y+config.PlayerSize > config.GridSize {
 		return false
 	}
-	if g.grid[p.Y][p.X] == 1 {
+	tx, ty := p.X/config.TileSize, p.Y/config.TileSize
+	if g.grid[ty][tx] == 1 {
 		return false
 	}
 	for i, pl := range g.players {
