@@ -59,6 +59,7 @@ func (h *Hub) Run() {
 				PlayerID: c.PlayerID,
 			}})
 			c.SendJSON(models.ServerMsg{Type: "map", Payload: h.game.GetMap()})
+			c.SendJSON(models.ServerMsg{Type: "stats", Payload: h.game.GetStats()})
 			c.SendJSON(models.ServerMsg{Type: "state", Payload: h.game.Snapshot()})
 
 		case c := <-h.unreg:
@@ -83,9 +84,14 @@ func (h *Hub) Run() {
 				default:
 				}
 			}
-			for _, kill := range state.KillEvents {
-				if victim, ok := h.clients[kill.VictimID]; ok {
-					victim.SendJSON(models.ServerMsg{Type: "killed", Payload: kill})
+			if len(state.KillEvents) > 0 {
+				statsMsg := models.ServerMsg{Type: "stats", Payload: h.game.GetStats()}
+				for _, kill := range state.KillEvents {
+					killMsg := models.ServerMsg{Type: "kill", Payload: kill}
+					for _, c := range h.clients {
+						c.SendJSON(killMsg)
+						c.SendJSON(statsMsg)
+					}
 				}
 			}
 			h.mu.Unlock()

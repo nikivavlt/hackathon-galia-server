@@ -11,6 +11,7 @@ type Player struct {
 	Pos       Pos    `json:"pos"`
 	Connected bool   `json:"connected"`
 	Direction string `json:"direction"`
+	Frags     int    `json:"frags"`
 }
 
 type Bullet struct {
@@ -35,9 +36,19 @@ type JoinedPayload struct {
 }
 
 type KillEvent struct {
-	VictimID int `json:"-"`
-	KillerID int `json:"killerId"`
+	VictimID   int    `json:"-"`
+	KillerID   int    `json:"killerId"`
+	KillerName string `json:"killerName"`
+	VictimName string `json:"victimName"`
 }
+
+type StatEntry struct {
+	PlayerID int    `json:"playerId"`
+	Name     string `json:"name"`
+	Frags    int    `json:"frags"`
+}
+
+type StatsPayload = []StatEntry
 
 type MapPayload struct {
 	Grid [][]int `json:"grid"`

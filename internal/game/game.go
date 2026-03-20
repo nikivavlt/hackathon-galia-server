@@ -42,33 +42,146 @@ func (g *Game) buildGrid() {
 		g.grid[i][s-1] = 1
 	}
 
+	g.generateWalls()
+	g.ensureConnectivity()
+}
+
+func (g *Game) generateWalls() {
+	s := config.TileCount
+	half := s / 2
+	cornerClear := 4
+
 	set := func(x, y, w, h int) {
 		for dy := 0; dy < h; dy++ {
 			for dx := 0; dx < w; dx++ {
-				if ty, tx := y+dy, x+dx; ty >= 0 && ty < s && tx >= 0 && tx < s {
-					g.grid[ty][tx] = 1
+				tx, ty := x+dx, y+dy
+				if tx <= 0 || ty <= 0 || tx >= s-1 || ty >= s-1 {
+					continue
 				}
+				if tx < 1+cornerClear && ty < 1+cornerClear {
+					continue
+				}
+				if tx > s-2-cornerClear && ty < 1+cornerClear {
+					continue
+				}
+				if tx < 1+cornerClear && ty > s-2-cornerClear {
+					continue
+				}
+				if tx > s-2-cornerClear && ty > s-2-cornerClear {
+					continue
+				}
+				g.grid[ty][tx] = 1
 			}
 		}
 	}
 
-	half := s / 2
-	q := s / 4
+	mirror4 := func(x, y, w, h int) {
+		set(x, y, w, h)
+		set(s-1-x-w, y, w, h)
+		set(x, s-1-y-h, w, h)
+		set(s-1-x-w, s-1-y-h, w, h)
+	}
 
-	set(half-3, q-1, 6, 1)
-	set(half-3, half+q-1, 6, 1)
-	set(q-1, half-3, 1, 6)
-	set(half+q-1, half-3, 1, 6)
-	set(half-1, half-5, 1, 10)
-	set(half-5, half-1, 10, 1)
-	set(q-2, q-1, 4, 1)
-	set(q-1, q-2, 1, 4)
-	set(half+q-2, q-1, 4, 1)
-	set(half+q-1, q-2, 1, 4)
-	set(q-2, half+q-1, 4, 1)
-	set(q-1, half+q-2, 1, 4)
-	set(half+q-2, half+q-1, 4, 1)
-	set(half+q-1, half+q-2, 1, 4)
+	mirrorCenter := func(x, y, w, h int) {
+		set(x, y, w, h)
+		set(s-1-x-w, s-1-y-h, w, h)
+	}
+
+	segmentCount := 8 + rand.Intn(7)
+
+	for i := 0; i < segmentCount; i++ {
+		shape := rand.Intn(4)
+		qx := 1 + cornerClear + rand.Intn(half-2-cornerClear)
+		qy := 1 + cornerClear + rand.Intn(half-2-cornerClear)
+
+		switch shape {
+		case 0:
+			l := 2 + rand.Intn(4)
+			mirror4(qx, qy, l, 1)
+		case 1:
+			l := 2 + rand.Intn(4)
+			mirror4(qx, qy, 1, l)
+		case 2:
+			l := 2 + rand.Intn(3)
+			mirror4(qx, qy, l, 1)
+			mirror4(qx, qy, 1, l)
+		case 3:
+			l := 2 + rand.Intn(3)
+			mirror4(qx, qy, l, 1)
+			mirror4(qx+l-1, qy, 1, l)
+		}
+	}
+
+	centerCount := 1 + rand.Intn(3)
+	for i := 0; i < centerCount; i++ {
+		shape := rand.Intn(3)
+		cx := half - 2 + rand.Intn(4)
+		cy := half - 2 + rand.Intn(4)
+		switch shape {
+		case 0:
+			l := 2 + rand.Intn(4)
+			mirrorCenter(cx, cy, l, 1)
+		case 1:
+			l := 2 + rand.Intn(4)
+			mirrorCenter(cx, cy, 1, l)
+		case 2:
+			mirrorCenter(cx, cy, 3, 1)
+			mirrorCenter(cx, cy, 1, 3)
+		}
+	}
+}
+
+func (g *Game) ensureConnectivity() {
+	s := config.TileCount
+
+	findStart := func() (int, int) {
+		for y := 1; y < s-1; y++ {
+			for x := 1; x < s-1; x++ {
+				if g.grid[y][x] == 0 {
+					return x, y
+				}
+			}
+		}
+		return 1, 1
+	}
+
+	floodFill := func(sx, sy int) map[[2]int]bool {
+		visited := make(map[[2]int]bool)
+		queue := [][2]int{{sx, sy}}
+		visited[[2]int{sx, sy}] = true
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			for _, d := range [][2]int{{0, 1}, {0, -1}, {1, 0}, {-1, 0}} {
+				nx, ny := cur[0]+d[0], cur[1]+d[1]
+				if nx <= 0 || ny <= 0 || nx >= s-1 || ny >= s-1 {
+					continue
+				}
+				if g.grid[ny][nx] == 1 {
+					continue
+				}
+				if visited[[2]int{nx, ny}] {
+					continue
+				}
+				visited[[2]int{nx, ny}] = true
+				queue = append(queue, [2]int{nx, ny})
+			}
+		}
+		return visited
+	}
+
+	for pass := 0; pass < 3; pass++ {
+		sx, sy := findStart()
+		reachable := floodFill(sx, sy)
+
+		for y := 1; y < s-1; y++ {
+			for x := 1; x < s-1; x++ {
+				if g.grid[y][x] == 0 && !reachable[[2]int{x, y}] {
+					g.grid[y][x] = 1
+				}
+			}
+		}
+	}
 }
 
 func (g *Game) GetMap() models.MapPayload {
@@ -100,14 +213,21 @@ func (g *Game) ConnectPlayer(id int, name string) {
 
 func (g *Game) findSpawnPos() models.Pos {
 	safeRadius := config.PlayerSize * 3
-	maxX := config.GridSize - config.PlayerSize
-	maxY := config.GridSize - config.PlayerSize
+	maxTX := config.TileCount - 2
+	maxTY := config.TileCount - 2
 
-	for attempt := 0; attempt < 100; attempt++ {
+	for attempt := 0; attempt < 300; attempt++ {
+		tx := 1 + rand.Intn(maxTX-1)
+		ty := 1 + rand.Intn(maxTY-1)
 		p := models.Pos{
-			X: rand.Intn(maxX),
-			Y: rand.Intn(maxY),
+			X: tx * config.TileSize,
+			Y: ty * config.TileSize,
 		}
+
+		if !g.spawnWalkable(p) {
+			continue
+		}
+
 		overlap := false
 		for _, pl := range g.players {
 			if !pl.Connected {
@@ -130,7 +250,38 @@ func (g *Game) findSpawnPos() models.Pos {
 			return p
 		}
 	}
-	return models.Pos{X: rand.Intn(maxX), Y: rand.Intn(maxY)}
+	return g.fallbackSpawnPos()
+}
+
+func (g *Game) spawnWalkable(p models.Pos) bool {
+	for dy := 0; dy < config.PlayerSize; dy += config.TileSize {
+		for dx := 0; dx < config.PlayerSize; dx += config.TileSize {
+			tx := (p.X + dx) / config.TileSize
+			ty := (p.Y + dy) / config.TileSize
+			if tx < 0 || ty < 0 || tx >= config.TileCount || ty >= config.TileCount {
+				return false
+			}
+			if g.grid[ty][tx] == 1 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (g *Game) fallbackSpawnPos() models.Pos {
+	margin := config.TileSize * 2
+	for ty := 1; ty < config.TileCount-1; ty++ {
+		for tx := 1; tx < config.TileCount-1; tx++ {
+			if g.grid[ty][tx] == 0 {
+				return models.Pos{
+					X: tx*config.TileSize + margin,
+					Y: ty*config.TileSize + margin,
+				}
+			}
+		}
+	}
+	return models.Pos{X: margin, Y: margin}
 }
 
 func (g *Game) DisconnectPlayer(id int) {
@@ -232,7 +383,15 @@ func (g *Game) Tick() models.StatePayload {
 						respawned.Pos = g.findSpawnPos()
 						g.players[j] = respawned
 						g.activeDirections[j] = ""
-						kills = append(kills, models.KillEvent{VictimID: j, KillerID: b.PlayerID})
+						killer := g.players[b.PlayerID]
+						killer.Frags++
+						g.players[b.PlayerID] = killer
+						kills = append(kills, models.KillEvent{
+							VictimID:   j,
+							KillerID:   b.PlayerID,
+							KillerName: killer.Name,
+							VictimName: pl.Name,
+						})
 						keep = false
 						hit = true
 						break
@@ -252,6 +411,28 @@ func (g *Game) Tick() models.StatePayload {
 	payload := g.buildPayload()
 	payload.KillEvents = kills
 	return payload
+}
+
+func (g *Game) GetStats() models.StatsPayload {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	leaderboard := make([]models.StatEntry, 0, len(g.players))
+	for _, pl := range g.players {
+		leaderboard = append(leaderboard, models.StatEntry{
+			PlayerID: pl.ID,
+			Name:     pl.Name,
+			Frags:    pl.Frags,
+		})
+	}
+	for i := 0; i < len(leaderboard)-1; i++ {
+		for j := i + 1; j < len(leaderboard); j++ {
+			if leaderboard[j].Frags > leaderboard[i].Frags {
+				leaderboard[i], leaderboard[j] = leaderboard[j], leaderboard[i]
+			}
+		}
+	}
+	return leaderboard
 }
 
 func (g *Game) Snapshot() models.StatePayload {
@@ -281,9 +462,16 @@ func (g *Game) walkable(p models.Pos, forPlayer int) bool {
 	if p.X < 0 || p.Y < 0 || p.X+config.PlayerSize > config.GridSize || p.Y+config.PlayerSize > config.GridSize {
 		return false
 	}
-	tx, ty := p.X/config.TileSize, p.Y/config.TileSize
-	if g.grid[ty][tx] == 1 {
-		return false
+	corners := [4][2]int{
+		{p.X, p.Y},
+		{p.X + config.PlayerSize - 1, p.Y},
+		{p.X, p.Y + config.PlayerSize - 1},
+		{p.X + config.PlayerSize - 1, p.Y + config.PlayerSize - 1},
+	}
+	for _, c := range corners {
+		if g.grid[c[1]/config.TileSize][c[0]/config.TileSize] == 1 {
+			return false
+		}
 	}
 	for i, pl := range g.players {
 		if i == forPlayer || !pl.Connected {
