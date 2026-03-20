@@ -84,6 +84,17 @@ func (h *Hub) Run() {
 				default:
 				}
 			}
+			// Re-broadcast map whenever a bonus was picked up or respawned
+			if h.game.ConsumeGridDirty() {
+				if mapData, err := json.Marshal(models.ServerMsg{Type: "map", Payload: h.game.GetMap()}); err == nil {
+					for _, c := range h.clients {
+						select {
+						case c.Send <- mapData:
+						default:
+						}
+					}
+				}
+			}
 			if len(state.KillEvents) > 0 {
 				statsMsg := models.ServerMsg{Type: "stats", Payload: h.game.GetStats()}
 				for _, kill := range state.KillEvents {
