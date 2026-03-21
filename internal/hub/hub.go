@@ -100,8 +100,10 @@ func (h *Hub) Run() {
 					killMsg := models.ServerMsg{Type: "kill", Payload: kill}
 					for _, c := range h.clients {
 						c.SendJSON(killMsg)
-						c.SendJSON(statsMsg)
 					}
+				}
+				for _, c := range h.clients {
+					c.SendJSON(statsMsg)
 				}
 			}
 			h.mu.Unlock()
@@ -114,8 +116,8 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "Player"
 	}
-	if len(name) > 20 {
-		name = name[:20]
+	if runes := []rune(name); len(runes) > 20 {
+		name = string(runes[:20])
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -137,7 +139,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		PlayerID: id,
 		Name:     name,
 	}
-	h.reg <- c
 	go c.WritePump()
 	go c.ReadPump()
+	h.reg <- c
 }

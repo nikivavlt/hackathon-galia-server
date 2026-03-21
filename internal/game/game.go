@@ -363,18 +363,17 @@ func (g *Game) spawnWalkable(p models.Pos) bool {
 }
 
 func (g *Game) fallbackSpawnPos() models.Pos {
-	margin := config.TileSize * 2
 	for ty := 1; ty < config.TileCount-1; ty++ {
 		for tx := 1; tx < config.TileCount-1; tx++ {
 			if g.grid[ty][tx] == 0 {
 				return models.Pos{
-					X: tx*config.TileSize + margin,
-					Y: ty*config.TileSize + margin,
+					X: tx * config.TileSize,
+					Y: ty * config.TileSize,
 				}
 			}
 		}
 	}
-	return models.Pos{X: margin, Y: margin}
+	return models.Pos{X: config.TileSize, Y: config.TileSize}
 }
 
 func (g *Game) DisconnectPlayer(id int) {
