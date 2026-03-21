@@ -2,6 +2,7 @@ package game
 
 import (
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -253,16 +254,21 @@ func (g *Game) ensureConnectivity() {
 		return visited
 	}
 
-	for pass := 0; pass < 3; pass++ {
+	for {
 		sx, sy := findStart()
 		reachable := floodFill(sx, sy)
 
+		changed := false
 		for y := 1; y < s-1; y++ {
 			for x := 1; x < s-1; x++ {
 				if g.grid[y][x] == 0 && !reachable[[2]int{x, y}] {
 					g.grid[y][x] = 1
+					changed = true
 				}
 			}
+		}
+		if !changed {
+			break
 		}
 	}
 }
@@ -323,9 +329,6 @@ func (g *Game) findSpawnPos() models.Pos {
 
 		overlap := false
 		for _, pl := range g.players {
-			if !pl.Connected {
-				continue
-			}
 			dx := p.X - pl.Pos.X
 			dy := p.Y - pl.Pos.Y
 			if dx < 0 {
@@ -388,13 +391,13 @@ func (g *Game) DisconnectPlayer(id int) {
 
 func (g *Game) SetMove(playerID int, dir string) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	if dir == "stop" {
 		g.activeDirections[playerID] = ""
 	} else {
 		g.activeDirections[playerID] = dir
 		g.lastDirections[playerID] = dir
 	}
-	g.mu.Unlock()
 }
 
 func (g *Game) Shoot(playerID int) {
@@ -402,7 +405,7 @@ func (g *Game) Shoot(playerID int) {
 	defer g.mu.Unlock()
 
 	pl, ok := g.players[playerID]
-	if !ok || !pl.Connected {
+	if !ok {
 		return
 	}
 	dir := g.lastDirections[playerID]
@@ -441,7 +444,7 @@ func (g *Game) Tick() models.StatePayload {
 
 	var bonusEvents []models.BonusEvent
 	for id, pl := range g.players {
-		if !pl.Connected || g.activeDirections[id] == "" {
+		if g.activeDirections[id] == "" {
 			continue
 		}
 		pl.SpeedActive = pl.SpeedUntil > now
@@ -485,7 +488,7 @@ func (g *Game) Tick() models.StatePayload {
 
 				hit := false
 				for j, pl := range g.players {
-					if j == b.PlayerID || !pl.Connected {
+					if j == b.PlayerID {
 						continue
 					}
 					if b.Pos.X < pl.Pos.X+config.PlayerSize && b.Pos.X+config.BulletSize > pl.Pos.X &&
@@ -544,13 +547,9 @@ func (g *Game) GetStats() models.StatsPayload {
 			Frags:    pl.Frags,
 		})
 	}
-	for i := 0; i < len(leaderboard)-1; i++ {
-		for j := i + 1; j < len(leaderboard); j++ {
-			if leaderboard[j].Frags > leaderboard[i].Frags {
-				leaderboard[i], leaderboard[j] = leaderboard[j], leaderboard[i]
-			}
-		}
-	}
+	sort.Slice(leaderboard, func(i, j int) bool {
+		return leaderboard[i].Frags > leaderboard[j].Frags
+	})
 	return leaderboard
 }
 
@@ -628,7 +627,7 @@ func (g *Game) walkable(p models.Pos, forPlayer int) bool {
 		}
 	}
 	for i, pl := range g.players {
-		if i == forPlayer || !pl.Connected {
+		if i == forPlayer {
 			continue
 		}
 		if p.X < pl.Pos.X+config.PlayerSize && p.X+config.PlayerSize > pl.Pos.X &&

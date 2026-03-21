@@ -45,7 +45,7 @@ type ClientMsg struct {
 
 type ServerMsg struct {
 	Type    string      `json:"type"`
-	Payload interface{} `json:"payload"`
+	Payload any `json:"payload"`
 }
 
 type JoinedPayload struct {
@@ -53,7 +53,7 @@ type JoinedPayload struct {
 }
 
 type KillEvent struct {
-	VictimID   int    `json:"-"`
+	VictimID   int    `json:"victimId"`
 	KillerID   int    `json:"killerId"`
 	KillerName string `json:"killerName"`
 	VictimName string `json:"victimName"`

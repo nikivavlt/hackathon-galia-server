@@ -71,10 +71,23 @@ func (h *Hub) Run() {
 			log.Printf("[hub] player %d disconnected (%d total)", c.PlayerID, len(h.clients))
 
 		case <-ticker.C:
+			// All game calls happen outside h.mu to avoid lock-ordering issues
+			// (game methods acquire g.mu internally).
 			state := h.game.Tick()
 			data, err := json.Marshal(models.ServerMsg{Type: "state", Payload: state})
 			if err != nil {
 				continue
+			}
+
+			var mapData []byte
+			if h.game.ConsumeGridDirty() {
+				mapData, _ = json.Marshal(models.ServerMsg{Type: "map", Payload: h.game.GetMap()})
+			}
+
+			var statsMsg *models.ServerMsg
+			if len(state.KillEvents) > 0 {
+				msg := models.ServerMsg{Type: "stats", Payload: h.game.GetStats()}
+				statsMsg = &msg
 			}
 
 			h.mu.Lock()
@@ -84,18 +97,15 @@ func (h *Hub) Run() {
 				default:
 				}
 			}
-			if h.game.ConsumeGridDirty() {
-				if mapData, err := json.Marshal(models.ServerMsg{Type: "map", Payload: h.game.GetMap()}); err == nil {
-					for _, c := range h.clients {
-						select {
-						case c.Send <- mapData:
-						default:
-						}
+			if mapData != nil {
+				for _, c := range h.clients {
+					select {
+					case c.Send <- mapData:
+					default:
 					}
 				}
 			}
-			if len(state.KillEvents) > 0 {
-				statsMsg := models.ServerMsg{Type: "stats", Payload: h.game.GetStats()}
+			if statsMsg != nil {
 				for _, kill := range state.KillEvents {
 					killMsg := models.ServerMsg{Type: "kill", Payload: kill}
 					for _, c := range h.clients {
@@ -103,7 +113,7 @@ func (h *Hub) Run() {
 					}
 				}
 				for _, c := range h.clients {
-					c.SendJSON(statsMsg)
+					c.SendJSON(*statsMsg)
 				}
 			}
 			h.mu.Unlock()

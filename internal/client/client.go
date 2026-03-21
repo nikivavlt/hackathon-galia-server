@@ -35,7 +35,7 @@ type Client struct {
 	Name     string
 }
 
-func (c *Client) SendJSON(v interface{}) {
+func (c *Client) SendJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
