@@ -71,8 +71,6 @@ func (h *Hub) Run() {
 			log.Printf("[hub] player %d disconnected (%d total)", c.PlayerID, len(h.clients))
 
 		case <-ticker.C:
-			// All game calls happen outside h.mu to avoid lock-ordering issues
-			// (game methods acquire g.mu internally).
 			state := h.game.Tick()
 			data, err := json.Marshal(models.ServerMsg{Type: "state", Payload: state})
 			if err != nil {
