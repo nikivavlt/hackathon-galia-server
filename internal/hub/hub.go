@@ -84,7 +84,6 @@ func (h *Hub) Run() {
 				default:
 				}
 			}
-			// Re-broadcast map whenever a bonus was picked up or respawned
 			if h.game.ConsumeGridDirty() {
 				if mapData, err := json.Marshal(models.ServerMsg{Type: "map", Payload: h.game.GetMap()}); err == nil {
 					for _, c := range h.clients {

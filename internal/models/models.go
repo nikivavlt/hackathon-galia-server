@@ -1,6 +1,5 @@
 package models
 
-// BonusKind maps to the grid values used by the client renderer.
 type BonusKind int
 
 const (
@@ -26,8 +25,8 @@ type Player struct {
 	Connected      bool   `json:"connected"`
 	Direction      string `json:"direction"`
 	Frags          int    `json:"frags"`
-	SpeedUntil     int64  `json:"-"` // internal: UnixMilli when speed expires
-	ImmortalUntil  int64  `json:"-"` // internal: UnixMilli when immunity expires
+	SpeedUntil     int64  `json:"-"`
+	ImmortalUntil  int64  `json:"-"`
 	SpeedActive    bool   `json:"speedActive"`
 	ImmortalActive bool   `json:"immortalActive"`
 }
@@ -75,7 +74,7 @@ type MapPayload struct {
 type BonusEvent struct {
 	PlayerID   int       `json:"playerId"`
 	PlayerName string    `json:"playerName"`
-	Kind       BonusKind `json:"kind"` // 2=speed, 3=immortality
+	Kind       BonusKind `json:"kind"`
 }
 
 type StatePayload struct {

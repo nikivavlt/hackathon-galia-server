@@ -12,8 +12,8 @@ const (
 	ShootCooldownMs = 300
 	MaxBullets      = 5
 
-	BonusSpeedMs    = 10000 // speed boost duration ms
-	BonusImmunityMs = 10000 // immunity duration ms
-	BonusRespawnMs  = 12000 // ms before a collected bonus respawns
-	BonusCount      = 4     // total bonuses active on map at once
+	BonusSpeedMs    = 10000
+	BonusImmunityMs = 10000
+	BonusRespawnMs  = 12000
+	BonusCount      = 4
 )

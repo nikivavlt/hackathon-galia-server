@@ -11,7 +11,7 @@ import (
 
 type pendingBonus struct {
 	kind    models.BonusKind
-	spawnAt int64 // UnixMilli when this bonus should reappear
+	spawnAt int64
 }
 
 type Game struct {
@@ -26,7 +26,7 @@ type Game struct {
 	bonuses          map[int]*models.Bonus
 	nextBonusID      int
 	pendingBonuses   []pendingBonus
-	gridDirty        bool // true when bonus tiles changed; hub should re-broadcast map
+	gridDirty        bool
 }
 
 func NewGame() *Game {
@@ -45,7 +45,6 @@ func NewGame() *Game {
 func (g *Game) buildGrid() {
 	s := config.TileCount
 
-	// Outer border walls
 	for i := 0; i < s; i++ {
 		g.grid[0][i] = 1
 		g.grid[s-1][i] = 1
@@ -58,129 +57,64 @@ func (g *Game) buildGrid() {
 	g.spawnInitialBonuses()
 }
 
-// generateWalls builds an open-arena map:
-// start with a fully open interior, then scatter a small number of
-// 4-fold-symmetric cover structures across a regular grid.
-// Every path between any two structures is guaranteed ≥4 tiles wide.
 func (g *Game) generateWalls() {
-	s := config.TileCount // 32 tiles
+	s := config.TileCount
 
-	// wall writes a wall tile, clamped inside the border.
-	wall := func(tx, ty int) {
-		if tx > 0 && tx < s-1 && ty > 0 && ty < s-1 {
-			g.grid[ty][tx] = 1
-		}
-	}
-
-	// block fills a rectangle with walls.
-	block := func(x, y, w, h int) {
-		for dy := 0; dy < h; dy++ {
-			for dx := 0; dx < w; dx++ {
-				wall(x+dx, y+dy)
+	bl := func(x, y, w, h int) {
+		for ty := y; ty < y+h; ty++ {
+			for tx := x; tx < x+w; tx++ {
+				if tx > 0 && tx < s-1 && ty > 0 && ty < s-1 {
+					g.grid[ty][tx] = 1
+				}
 			}
 		}
 	}
 
-	// place4 stamps a shape at (cx,cy) and its 3 mirror copies.
-	// cx,cy are in the top-left quadrant; mirrors fill the other three.
-	place4 := func(cx, cy int, draw func(ox, oy int)) {
-		for _, sx := range []int{1, -1} {
-			for _, sy := range []int{1, -1} {
-				draw(cx*sx + (s/2)*(1-sx)/2*2, cy*sy + (s/2)*(1-sy)/2*2)
-			}
-		}
-	}
-	_ = place4
+	switch rand.Intn(5) {
 
-	// mirror4 stamps shape centred at (cx,cy) and its 4-fold mirror.
-	// cx,cy are offsets from map centre (s/2).
-	mirror4 := func(cx, cy int, draw func(ax, ay int)) {
-		half := s / 2
-		draw(half+cx, half+cy)
-		draw(half-cx, half+cy)
-		draw(half+cx, half-cy)
-		draw(half-cx, half-cy)
-	}
+	case 0:
+		bl(1, 6, 14, 2)
+		bl(17, 12, 14, 2)
+		bl(1, 18, 14, 2)
+		bl(17, 24, 14, 2)
+		bl(17, 8, 2, 2)
+		bl(11, 15, 2, 2)
+		bl(17, 21, 2, 2)
+		bl(4, 2, 2, 2)
+		bl(26, 2, 2, 2)
 
-	// ── Cover shape library ─────────────────────────────────────────────────
-	// Each shape is a small cluster of wall tiles relative to an anchor (ax,ay).
-	shapes := []func(ax, ay int){
-		// 2×2 solid pillar
-		func(ax, ay int) { block(ax, ay, 2, 2) },
-		// 3×1 horizontal bar
-		func(ax, ay int) { block(ax-1, ay, 3, 1) },
-		// 1×3 vertical bar
-		func(ax, ay int) { block(ax, ay-1, 1, 3) },
-		// L-shape (2 tiles right, 2 tiles down)
-		func(ax, ay int) {
-			block(ax, ay, 3, 1) // horizontal arm
-			block(ax, ay, 1, 3) // vertical arm
-		},
-		// T-shape
-		func(ax, ay int) {
-			block(ax-1, ay, 3, 1) // top bar
-			block(ax, ay+1, 1, 2) // stem
-		},
-		// Z-shape
-		func(ax, ay int) {
-			block(ax, ay, 2, 1)
-			block(ax+1, ay+1, 2, 1)
-		},
-		// Plus / cross
-		func(ax, ay int) {
-			block(ax-1, ay, 3, 1)
-			block(ax, ay-1, 1, 3)
-		},
-	}
+	case 1:
+		bl(2, 2, 8, 2); bl(2, 2, 2, 8)
+		bl(22, 2, 8, 2); bl(28, 2, 2, 8)
+		bl(2, 28, 8, 2); bl(2, 22, 2, 8)
+		bl(22, 28, 8, 2); bl(28, 22, 2, 8)
+		bl(8, 8, 2, 2); bl(22, 8, 2, 2)
+		bl(8, 22, 2, 2); bl(22, 22, 2, 2)
+		bl(14, 14, 4, 4)
 
-	// ── Grid placement ───────────────────────────────────────────────────
-	// Divide the top-left quadrant into cells of size `cell`.
-	// Each cell gets a shape with probability `density`.
-	// cell=7 → paths between objects always ≥4 tiles wide (7-3=4).
-	const cell = 7
-	const density = 55 // percent chance a cell gets a shape
+	case 2:
+		bl(11, 5, 2, 22)
+		bl(19, 5, 2, 22)
+		bl(13, 14, 6, 3)
+		bl(5, 8, 2, 6); bl(25, 8, 2, 6)
+		bl(5, 19, 2, 6); bl(25, 19, 2, 6)
 
-	// Keep 3 tiles clear of border so corner spawn areas stay open.
-	half := s / 2
-	for cy := 3; cy < half-2; cy += cell {
-		for cx := 3; cx < half-2; cx += cell {
-			if rand.Intn(100) >= density {
-				continue
-			}
-			// Jitter anchor slightly within the cell for organic feel.
-			jx := cx + rand.Intn(3)
-			jy := cy + rand.Intn(3)
-			shape := shapes[rand.Intn(len(shapes))]
-			// Stamp 4-fold symmetric: top-left, top-right, bottom-left, bottom-right.
-			mirror4(jx, jy, shape)
-		}
-	}
+	case 3:
+		bl(3, 6, 11, 2); bl(18, 6, 11, 2)
+		bl(3, 24, 11, 2); bl(18, 24, 11, 2)
+		bl(6, 3, 2, 11); bl(6, 18, 2, 11)
+		bl(24, 3, 2, 11); bl(24, 18, 2, 11)
+		bl(12, 12, 2, 2); bl(18, 12, 2, 2)
+		bl(12, 18, 2, 2); bl(18, 18, 2, 2)
 
-	// ── Centre piece ───────────────────────────────────────────────────────
-	// Always place one centrepiece for map identity.
-	mid := s / 2
-	switch rand.Intn(4) {
-	case 0: // open centre — just a ring of pillars
-		for _, d := range []int{-3, 3} {
-			block(mid+d, mid-1, 1, 2)
-			block(mid-1, mid+d, 2, 1)
-		}
-	case 1: // solid 3×3 centre block
-		block(mid-1, mid-1, 3, 3)
-	case 2: // hollow 5×5 centre frame (open inside)
-		block(mid-2, mid-2, 5, 1)
-		block(mid-2, mid+2, 5, 1)
-		block(mid-2, mid-1, 1, 3)
-		block(mid+2, mid-1, 1, 3)
-	case 3: // diagonal pillars
-		for _, d := range []int{-2, 2} {
-			block(mid+d, mid+d, 2, 2)
-			block(mid-d-1, mid+d, 2, 2)
-		}
+	case 4:
+		bl(1, 5, 10, 2); bl(21, 9, 10, 2)
+		bl(1, 13, 10, 2); bl(21, 17, 10, 2)
+		bl(1, 21, 10, 2); bl(21, 25, 10, 2)
+		bl(15, 8, 2, 2); bl(15, 16, 2, 2); bl(15, 24, 2, 2)
 	}
 }
 
-// spawnInitialBonuses places BonusCount bonuses evenly split between kinds.
 func (g *Game) spawnInitialBonuses() {
 	kinds := []models.BonusKind{
 		models.BonusSpeed, models.BonusSpeed,
@@ -191,8 +125,6 @@ func (g *Game) spawnInitialBonuses() {
 	}
 }
 
-// spawnBonus places one bonus of the given kind on a random open tile,
-// keeping at least 4 tiles away from every other bonus.
 func (g *Game) spawnBonus(kind models.BonusKind) {
 	for attempt := 0; attempt < 300; attempt++ {
 		tx := 2 + rand.Intn(config.TileCount-4)
@@ -222,14 +154,12 @@ func (g *Game) spawnBonus(kind models.BonusKind) {
 		id := g.nextBonusID
 		g.nextBonusID++
 		g.bonuses[id] = &models.Bonus{ID: id, Kind: kind, Pos: p}
-		g.grid[ty][tx] = int(kind) // stamp 2 or 3 into the grid
+		g.grid[ty][tx] = int(kind)
 		g.gridDirty = true
 		return
 	}
 }
 
-// checkBonusPickup checks whether the player stepped on any bonus this tick,
-// applies the effect, and returns any BonusEvent that occurred.
 func (g *Game) checkBonusPickup(pl models.Player, now int64) (models.Player, *models.BonusEvent) {
 	pcx := pl.Pos.X + config.PlayerSize/2
 	pcy := pl.Pos.Y + config.PlayerSize/2
@@ -247,7 +177,7 @@ func (g *Game) checkBonusPickup(pl models.Player, now int64) (models.Player, *mo
 		if dx < config.TileSize && dy < config.TileSize {
 			tx := b.Pos.X / config.TileSize
 			ty := b.Pos.Y / config.TileSize
-			g.grid[ty][tx] = 0 // clear bonus tile from grid
+			g.grid[ty][tx] = 0
 			g.gridDirty = true
 			delete(g.bonuses, id)
 			g.pendingBonuses = append(g.pendingBonuses, pendingBonus{
@@ -272,7 +202,6 @@ func (g *Game) checkBonusPickup(pl models.Player, now int64) (models.Player, *mo
 	return pl, nil
 }
 
-// tickBonuses respawns any bonus whose cooldown has elapsed.
 func (g *Game) tickBonuses(now int64) {
 	remaining := g.pendingBonuses[:0]
 	for _, pb := range g.pendingBonuses {
@@ -338,8 +267,6 @@ func (g *Game) ensureConnectivity() {
 	}
 }
 
-// ConsumeGridDirty returns true (and resets the flag) if the grid changed
-// since the last call — hub uses this to re-broadcast the map message.
 func (g *Game) ConsumeGridDirty() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -511,29 +438,30 @@ func (g *Game) Tick() models.StatePayload {
 	now := time.Now().UnixMilli()
 	var kills []models.KillEvent
 
-	// ── 1. Respawn collected bonuses whose timer elapsed ────────────────────
 	g.tickBonuses(now)
 
-	// ── 2. Move players, apply speed buff, pick up bonuses ────────────────
 	var bonusEvents []models.BonusEvent
 	for id, pl := range g.players {
 		if !pl.Connected || g.activeDirections[id] == "" {
 			continue
 		}
-		// Derive active flags from timestamps each tick
 		pl.SpeedActive = pl.SpeedUntil > now
 		pl.ImmortalActive = pl.ImmortalUntil > now
 		speed := config.Speed
 		if pl.SpeedActive {
 			speed = config.Speed * 2
 		}
+		dir := g.activeDirections[id]
 		for step := 0; step < speed; step++ {
-			next := move(pl.Pos, g.activeDirections[id])
-			if !g.walkable(next, id) {
-				g.activeDirections[id] = ""
-				break
+			next := move(pl.Pos, dir)
+			if g.walkable(next, id) {
+				pl.Pos = next
+				continue
 			}
-			pl.Pos = next
+			if slid, ok := g.slideInto(pl.Pos, dir, id); ok {
+				pl.Pos = slid
+			}
+			break
 		}
 		var ev *models.BonusEvent
 		pl, ev = g.checkBonusPickup(pl, now)
@@ -543,7 +471,6 @@ func (g *Game) Tick() models.StatePayload {
 		g.players[id] = pl
 	}
 
-	// ── 3. Advance bullets + hit detection ──────────────────────────────
 	for id, playerBullets := range g.bullets {
 		active := playerBullets[:0]
 		for _, b := range playerBullets {
@@ -565,7 +492,7 @@ func (g *Game) Tick() models.StatePayload {
 					if b.Pos.X < pl.Pos.X+config.PlayerSize && b.Pos.X+config.BulletSize > pl.Pos.X &&
 						b.Pos.Y < pl.Pos.Y+config.PlayerSize && b.Pos.Y+config.BulletSize > pl.Pos.Y {
 						if pl.ImmortalActive {
-							continue // bullet passes through immortal player
+						continue
 						}
 						respawned := pl
 						respawned.Pos = g.findSpawnPos()
@@ -654,6 +581,36 @@ func (g *Game) buildPayload() models.StatePayload {
 	}
 
 	return models.StatePayload{Players: players, Bullets: bullets, Bonuses: bonuses}
+}
+
+func (g *Game) slideInto(pos models.Pos, dir string, id int) (models.Pos, bool) {
+	nudgeX := dir == "up" || dir == "down"
+	var val int
+	if nudgeX {
+		val = pos.X
+	} else {
+		val = pos.Y
+	}
+	mod := val % config.TileSize
+	if mod == 0 {
+		return pos, false
+	}
+	var delta int
+	if mod <= config.TileSize/2 {
+		delta = -1
+	} else {
+		delta = 1
+	}
+	candidate := pos
+	if nudgeX {
+		candidate.X += delta
+	} else {
+		candidate.Y += delta
+	}
+	if g.walkable(candidate, id) {
+		return candidate, true
+	}
+	return pos, false
 }
 
 func (g *Game) walkable(p models.Pos, forPlayer int) bool {
